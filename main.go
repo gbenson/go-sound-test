@@ -65,10 +65,9 @@ func _main() error {
 }
 
 type Sink struct {
-	pinner     runtime.Pinner
-	deviceID   sdl.AudioDeviceID
-	isOpen     atomic.Bool
-	deviceSpec sdl.AudioSpec
+	pinner   runtime.Pinner
+	deviceID sdl.AudioDeviceID
+	isOpen   atomic.Bool
 }
 
 func NewSink(options *Options) (sink *Sink, err error) {
@@ -115,12 +114,9 @@ func (sink *Sink) open(options *Options) error {
 		Callback: sdl.AudioCallback(C.fillBuffer),
 		UserData: sinkPtr,
 	}
-	sink.pinner.Pin(&desiredSpec)
-	sink.pinner.Pin(desiredSpec.Callback)
-	sink.pinner.Pin(desiredSpec.UserData)
 
-	spec := &sink.deviceSpec
-	dev, err := sdl.OpenAudioDevice(deviceName, false, &desiredSpec, spec, 0)
+	var spec sdl.AudioSpec
+	dev, err := sdl.OpenAudioDevice(deviceName, false, &desiredSpec, &spec, 0)
 	if err != nil {
 		return err
 	}
