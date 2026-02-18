@@ -3,7 +3,7 @@ module example.com
 go 1.24.2
 
 require (
-	gbenson.net/go/logger v1.4.0
+	gbenson.net/go/logger v1.5.0
 	github.com/veandco/go-sdl2 v0.4.40
 )
 

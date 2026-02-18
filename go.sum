@@ -1,5 +1,5 @@
-gbenson.net/go/logger v1.4.0 h1:MiXc7FsEBetyRyAyKa7r/aD+87STE3Z6m9dohz4B1Ck=
-gbenson.net/go/logger v1.4.0/go.mod h1:OJwU9QoXbfAyIF5G9wrQ2ro9bGutR5vY27wXE/qj/Js=
+gbenson.net/go/logger v1.5.0 h1:ZlwBH7OiiDFXli48srSnl7YEnrqgGgHPgH4+wUzKGCM=
+gbenson.net/go/logger v1.5.0/go.mod h1:OJwU9QoXbfAyIF5G9wrQ2ro9bGutR5vY27wXE/qj/Js=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
 github.com/godbus/dbus/v5 v5.0.4/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5xrFpKfA=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
