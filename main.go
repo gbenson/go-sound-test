@@ -33,32 +33,38 @@ func _main() error {
 	}
 	defer log.LoggedClose(sink, "sink")
 
+	go func() {
+		for i := 0; i < sink.sampleRate; i++ {
+			v := (127 - (i & 256)) * 500
+			sink.framesCh <- int16(v)
+		}
+		log.Info().Msg("Done sending")
+	}()
+
 	sink.Start()
-	time.Sleep(3 * time.Second)
+
+	time.Sleep(2 * time.Second)
+	log.Info().Msg("Done sleeping")
 
 	return nil
 }
 
+const sinkMagic uint64 = 3141592653589793238
+
 type Sink struct {
-	pinner   runtime.Pinner
-	deviceID sdl.AudioDeviceID
-	isOpen   atomic.Bool
+	magic      uint64
+	sampleRate int
+	framesCh   chan int16
+	pinner     runtime.Pinner
+	deviceID   sdl.AudioDeviceID
+	isOpened   atomic.Bool
 }
 
-func NewSink(options *Options) (sink *Sink, err error) {
+func NewSink(options *Options) (*Sink, error) {
 	if options == nil {
 		options = &Options{}
 	}
 
-	sink = &Sink{}
-	if err := sink.open(options); err != nil {
-		defer log.LoggedClose(sink, "sink")
-	}
-
-	return
-}
-
-func (sink *Sink) open(options *Options) error {
 	deviceName := options.DeviceName
 	sampleRate := options.sampleRate()
 	maxLatency := options.maxLatency()
@@ -76,18 +82,32 @@ func (sink *Sink) open(options *Options) error {
 	// heavy processing and cannot fill the audio buffer in time."
 	// Note that the sizes 512 and 4096 probably refer to _stereo_
 	// audio: our 10ms default at 48kHz yields a 256 frame buffer.
-	bufferFrames := 1 << (bits.Len(uint(maxBufferFrames)) - 1)
+	sdlBufferFrames := 1 << (bits.Len(uint(maxBufferFrames)) - 1)
 
-	sinkPtr := unsafe.Pointer(sink)
-	sink.pinner.Pin(sinkPtr)
+	sink := &Sink{
+		magic:      sinkMagic,
+		sampleRate: sampleRate,
+		framesCh:   make(chan int16, maxBufferFrames),
+	}
+
+	if err := sink.open(deviceName, sdlBufferFrames); err != nil {
+		defer log.LoggedClose(sink, "sink")
+		return nil, err
+	}
+
+	return sink, nil
+}
+
+func (sink *Sink) open(deviceName string, bufferFrames int) error {
+	sink.pinner.Pin(sink)
 
 	desiredSpec := sdl.AudioSpec{
-		Freq:     int32(sampleRate),
+		Freq:     int32(sink.sampleRate),
 		Format:   sdl.AUDIO_S16SYS, // signed 16-bit samples in native byte order
 		Channels: 1,                // mono
 		Samples:  uint16(bufferFrames),
 		Callback: sdl.AudioCallback(C.fillBuffer),
-		UserData: sinkPtr,
+		UserData: unsafe.Pointer(sink),
 	}
 
 	var spec sdl.AudioSpec
@@ -96,23 +116,28 @@ func (sink *Sink) open(options *Options) error {
 		return err
 	}
 	sink.deviceID = dev
-	sink.isOpen.Store(true)
+	sink.isOpened.Store(true)
 
 	log.Info().
 		Int("device_id", int(sink.deviceID)).
 		Int32("sample_rate", spec.Freq).
 		Uint16("audio_format", uint16(spec.Format)).
 		Uint8("num_channels", spec.Channels).
-		Uint16("buffer_num_frames", spec.Samples).
-		Uint32("buffer_size_bytes", spec.Size).
-		Msg("Sink")
+		Uint16("buffer_frames", spec.Samples).
+		Uint32("buffer_bytes", spec.Size).
+		Msg("Using SDL audio")
 
 	if spec.Format != sdl.AUDIO_S16SYS {
 		return fmt.Errorf("unexpected sample format 0x%x", spec.Format)
 	} else if spec.Channels != 1 {
 		return fmt.Errorf("unexpected number of channels (%d)", spec.Channels)
-	} else if int(spec.Samples) != bufferFrames {
-		return fmt.Errorf("unexpected buffer size (%d frames)", spec.Samples)
+	}
+
+	if int(spec.Freq) != sink.sampleRate {
+		log.Warn().Int32("sample_rate", spec.Freq).Msg("Unexpected")
+	}
+	if int(spec.Samples) != bufferFrames {
+		log.Warn().Uint16("buffer_size", spec.Samples).Msg("Unexpected")
 	}
 
 	return nil
@@ -120,11 +145,18 @@ func (sink *Sink) open(options *Options) error {
 
 // Close implements [io.Closer].
 func (sink *Sink) Close() error {
-	defer sink.pinner.Unpin()
+	d := func(msg string) { log.Debug().Msg(msg) }
 
-	if sink.isOpen.Swap(false) {
+	defer sink.pinner.Unpin()
+	defer d("Unpinning sink")
+
+	if sink.isOpened.Swap(false) {
 		defer sdl.CloseAudioDevice(sink.deviceID)
+		defer d("Closing audio device")
 	}
+
+	close(sink.framesCh)
+	defer d("Closing input channel")
 
 	return nil
 }
@@ -134,6 +166,15 @@ func (sink *Sink) Start() {
 }
 
 //export fillBuffer
-func fillBuffer(userdata unsafe.Pointer, stream *C.Uint8, length C.int) {
-	fmt.Printf("ptr=%v stream=%v len=%v\n", userdata, stream, length)
+func fillBuffer(receiver unsafe.Pointer, stream *C.Uint8, length C.int) {
+	sink := (*Sink)(receiver)
+	if got := sink.magic; got != sinkMagic {
+		panic(fmt.Sprintf("invalid sink.magic %d (0x%x) != %d", got, got, sinkMagic))
+	}
+
+	src := sink.framesCh
+	dst := unsafe.Slice((*int16)(unsafe.Pointer(stream)), int(length)/2)
+	for i := range dst {
+		dst[i] = <-src
+	}
 }
