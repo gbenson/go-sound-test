@@ -35,8 +35,8 @@ func _main() error {
 
 	go func() {
 		for i := 0; i < sink.sampleRate; i++ {
-			v := (127 - (i & 256)) * 500
-			sink.framesCh <- int16(v)
+			v := float32((128 - (i & 256)) * 250)
+			sink.framesCh <- v / 0x8000
 		}
 		log.Info().Msg("Done sending")
 	}()
@@ -54,7 +54,7 @@ const sinkMagic uint64 = 3141592653589793238
 type Sink struct {
 	magic      uint64
 	sampleRate int
-	framesCh   chan int16
+	framesCh   chan float32
 	pinner     runtime.Pinner
 	deviceID   sdl.AudioDeviceID
 	isOpened   atomic.Bool
@@ -87,7 +87,7 @@ func NewSink(options *Options) (*Sink, error) {
 	sink := &Sink{
 		magic:      sinkMagic,
 		sampleRate: sampleRate,
-		framesCh:   make(chan int16, maxBufferFrames),
+		framesCh:   make(chan float32, maxBufferFrames),
 	}
 
 	if err := sink.open(deviceName, sdlBufferFrames); err != nil {
@@ -103,7 +103,7 @@ func (sink *Sink) open(deviceName string, bufferFrames int) error {
 
 	desiredSpec := sdl.AudioSpec{
 		Freq:     int32(sink.sampleRate),
-		Format:   sdl.AUDIO_S16SYS, // signed 16-bit samples in native byte order
+		Format:   sdl.AUDIO_F32SYS, // signed 16-bit samples in native byte order
 		Channels: 1,                // mono
 		Samples:  uint16(bufferFrames),
 		Callback: sdl.AudioCallback(C.fillBuffer),
@@ -127,7 +127,7 @@ func (sink *Sink) open(deviceName string, bufferFrames int) error {
 		Uint32("buffer_bytes", spec.Size).
 		Msg("Using SDL audio")
 
-	if spec.Format != sdl.AUDIO_S16SYS {
+	if spec.Format != sdl.AUDIO_F32SYS {
 		return fmt.Errorf("unexpected sample format 0x%x", spec.Format)
 	} else if spec.Channels != 1 {
 		return fmt.Errorf("unexpected number of channels (%d)", spec.Channels)
@@ -173,7 +173,7 @@ func fillBuffer(receiver unsafe.Pointer, stream *C.Uint8, length C.int) {
 	}
 
 	src := sink.framesCh
-	dst := unsafe.Slice((*int16)(unsafe.Pointer(stream)), int(length)/2)
+	dst := unsafe.Slice((*float32)(unsafe.Pointer(stream)), int(length)/4)
 	for i := range dst {
 		dst[i] = <-src
 	}
